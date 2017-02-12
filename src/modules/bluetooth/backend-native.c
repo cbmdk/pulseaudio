@@ -238,6 +238,8 @@ static void rfcomm_io_callback(pa_mainloop_api *io, pa_io_event *e, int fd, pa_i
         char buf[512];
         ssize_t len;
         int gain;
+        int vendor, product, version, features;
+        int num;
 
         len = pa_read(fd, buf, 511, NULL);
         if (len < 0) {
@@ -253,6 +255,31 @@ static void rfcomm_io_callback(pa_mainloop_api *io, pa_io_event *e, int fd, pa_i
         } else if (sscanf(buf, "AT+VGM=%d", &gain) == 1) {
           t->microphone_gain = gain;
           pa_hook_fire(pa_bluetooth_discovery_hook(t->device->discovery, PA_BLUETOOTH_HOOK_TRANSPORT_MICROPHONE_GAIN_CHANGED), t);
+        } else if (sscanf(buf, "AT+XAPL=%04x-%04x-%04x,%d", &vendor, &product, &version, &features) == 4) {
+          if (features & 0x2) {
+            /* claim, that we support battery status reports */
+            pa_log_debug("RFCOMM >> +XAPL=iPhone,2");
+            len = write(fd, "+XAPL=iPhone,2\r\n", 16);
+          }
+        } else if (sscanf(buf, "AT+IPHONEACCEV=%d", &num) == 1) {
+          char *substr = strchr(buf, ',');
+          bool isval = false;
+          int key, val;
+
+          for (; substr; substr = strchr(substr, ',')) {
+            substr++;
+            if (!isval) {
+              key = atoi(substr);
+            } else {
+              val = atoi(substr);
+              if (key == 1) {
+                pa_log_notice("Battery Level: %d0%%", val + 1);
+              } else if (key == 2) {
+                pa_log_notice("Dock Status: %s", val ? "docked" : "undocked");
+              }
+            }
+            isval = !isval;
+          }
         }
 
         pa_log_debug("RFCOMM >> OK");
